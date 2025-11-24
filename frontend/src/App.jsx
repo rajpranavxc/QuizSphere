@@ -1,10 +1,13 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { fetchQuestion, checkAnswer } from './api'
 
 const TOTAL = 10
 
+const SCORE_MAP = [100,95,88,80,72,60,50,35,25,10]
+
 export default function App() {
   const [stage, setStage] = useState('select')
+  const [operationStage, setOperationStage] = useState(false)
   const [type, setType] = useState(null)
   const [question, setQuestion] = useState(null)
   const [index, setIndex] = useState(0)
@@ -12,26 +15,49 @@ export default function App() {
   const [correctCount, setCorrectCount] = useState(0)
   const [loading, setLoading] = useState(false)
   const [feedback, setFeedback] = useState(null)
+  const [timeLeft, setTimeLeft] = useState(10)
+  const [cumulativeScore, setCumulativeScore] = useState(0)
+  const timerRef = useRef(null)
+  const startRef = useRef(null)
 
   useEffect(() => {
     if (stage === 'quiz') loadQuestion()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage, index])
 
-  function start(t) {
+  function startMathematics() {
+    setOperationStage(true)
+  }
+
+  function startQuizForType(t) {
     setType(t)
     setIndex(0)
     setCorrectCount(0)
+    setCumulativeScore(0)
     setStage('quiz')
     setFeedback(null)
   }
 
+  function computeDifficulty() {
+    // difficulty 1..5 based on cumulative score progress
+    if (index === 0) return 1
+    const maxPossible = index * 100
+    if (maxPossible <= 0) return 1
+    const pct = cumulativeScore / maxPossible
+    const diff = Math.min(5, Math.max(1, Math.floor(pct * 5) + 1))
+    return diff
+  }
+
   async function loadQuestion() {
     setLoading(true)
+    clearTimer()
     try {
-      const q = await fetchQuestion(type)
+      const diff = computeDifficulty()
+      const q = await fetchQuestion(type, diff)
       setQuestion(q)
       setAnswer('')
+      setTimeLeft(10)
+      startTimer()
     } catch (e) {
       console.error(e)
       alert('Failed to load question')
@@ -39,14 +65,74 @@ export default function App() {
     setLoading(false)
   }
 
+  function startTimer() {
+    startRef.current = Date.now()
+    clearTimer()
+    setTimeLeft(10)
+    timerRef.current = setInterval(() => {
+      setTimeLeft(t => {
+        if (t <= 0.1) {
+          clearTimer()
+          handleExpire()
+          return 0
+        }
+        return +(t - 0.1).toFixed(1)
+      })
+    }, 100)
+  }
+
+  function clearTimer() {
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+  }
+
+  function handleExpire() {
+    // treat as wrong and move on
+    clearTimer()
+    setFeedback({ correct: false, expected: computeExpected(question) })
+    setTimeout(() => {
+      setFeedback(null)
+      if (index + 1 >= TOTAL) setStage('result')
+      else setIndex(i => i + 1)
+    }, 900)
+  }
+
+  function computeExpected(q) {
+    if (!q) return 0
+    const a = q.a, b = q.b
+    switch (q.op) {
+      case 'add': return a + b
+      case 'subtract': return a - b
+      case 'multiply': return a * b
+      case 'divide': return a / b
+      default: return 0
+    }
+  }
+
+  function scoreForElapsed(elapsedMs) {
+    const s = Math.floor(elapsedMs / 1000)
+    if (s < 0) return 0
+    if (s >= 10) return 0
+    return SCORE_MAP[s] || 0
+  }
+
   async function submit(e) {
-    e.preventDefault()
+    e && e.preventDefault()
     if (!question) return
+    clearTimer()
     setLoading(true)
     try {
-      const res = await checkAnswer({ a: question.a, b: question.b, op: question.op, answer: parseFloat(answer) })
-      if (res.correct) setCorrectCount(c => c + 1)
-      setFeedback(res)
+      const elapsed = Date.now() - (startRef.current || Date.now())
+      const points = scoreForElapsed(elapsed)
+      const payload = { a: question.a, b: question.b, op: question.op, answer: parseFloat(answer) }
+      const res = await checkAnswer(payload)
+      if (res.correct) {
+        setCorrectCount(c => c + 1)
+        setCumulativeScore(s => s + points)
+      }
+      setFeedback({ correct: res.correct, expected: res.expected, points: res.correct ? points : 0 })
     } catch (err) {
       console.error(err)
       alert('Failed to check answer')
@@ -56,49 +142,72 @@ export default function App() {
       setFeedback(null)
       if (index + 1 >= TOTAL) setStage('result')
       else setIndex(i => i + 1)
-    }, 750)
+    }, 900)
   }
 
   function restart() {
     setStage('select')
+    setOperationStage(false)
     setType(null)
     setQuestion(null)
     setIndex(0)
     setCorrectCount(0)
+    setCumulativeScore(0)
     setFeedback(null)
+    clearTimer()
   }
 
   return (
-    <div className="app">
+    <div className="app card">
       <h1>Quiz App</h1>
 
-      {stage === 'select' && (
+      {stage === 'select' && !operationStage && (
+        <div className="menu">
+          <p className="subtitle">Choose a category</p>
+          <div className="menu-grid">
+            <button className="big" onClick={startMathematics}>MATHEMATICS</button>
+          </div>
+          <p className="hint">GK & Grammar coming soon</p>
+        </div>
+      )}
+
+      {operationStage && stage === 'select' && (
         <div className="select">
-          <p>Select quiz type (10 questions):</p>
+          <p>Select arithmetic type (10 questions):</p>
           <div className="buttons">
             {['add', 'subtract', 'multiply', 'divide'].map(t => (
-              <button key={t} onClick={() => start(t)}>{t}</button>
+              <button key={t} onClick={() => startQuizForType(t)}>{t.toUpperCase()}</button>
             ))}
+            <div>
+              <button className="secondary" onClick={() => setOperationStage(false)}>Back</button>
+            </div>
           </div>
         </div>
       )}
 
       {stage === 'quiz' && (
         <div className="quiz">
-          <p>Question {index + 1} / {TOTAL}</p>
+          <div className="top-row">
+            <div>Question {index + 1} / {TOTAL}</div>
+            <div>Score: {cumulativeScore}</div>
+          </div>
+          <div className="time-bar">
+            <div className="time-fill" style={{ width: `${(timeLeft / 10) * 100}%` }} />
+          </div>
           {loading && <p>Loading...</p>}
           {question && (
-            <form onSubmit={submit}>
+            <form onSubmit={submit} className="question-form">
               <div className="q">{question.a} {opSymbol(question.op)} {question.b} = ?</div>
-              <input value={answer} onChange={e => setAnswer(e.target.value)} type="number" step="any" required />
+              <input autoFocus value={answer} onChange={e => setAnswer(e.target.value)} type="number" step="any" required />
               <div className="actions">
                 <button type="submit" disabled={loading}>Submit</button>
+                <button type="button" className="secondary" onClick={() => { clearTimer(); handleExpire(); }}>Skip</button>
               </div>
             </form>
           )}
           {feedback && (
             <div className={`feedback ${feedback.correct ? 'correct' : 'wrong'}`}>
-              {feedback.correct ? 'Correct' : `Wrong — Expected ${feedback.expected}`}
+              {feedback.correct ? `Correct (+${feedback.points})` : `Wrong — Expected ${feedback.expected}`}
             </div>
           )}
           <div className="score">Correct so far: {correctCount}</div>
@@ -109,6 +218,7 @@ export default function App() {
         <div className="result">
           <h2>Finished</h2>
           <p>You answered {correctCount} out of {TOTAL} correctly.</p>
+          <p>Total points: {cumulativeScore}</p>
           <button onClick={restart}>Back to menu</button>
         </div>
       )}

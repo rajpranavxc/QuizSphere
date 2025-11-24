@@ -1,6 +1,6 @@
-# Quiz App
+# QuizSphere
 
-This project contains a small quiz app: frontend in React (Vite) and backend in Go.
+This project (QuizSphere) contains a small quiz app: frontend in React (Vite) and backend in Go.
 
 Features:
 - Four quiz types: `add`, `subtract`, `multiply`, `divide`.
