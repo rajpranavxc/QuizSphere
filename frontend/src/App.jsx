@@ -17,13 +17,34 @@ export default function App() {
   const [feedback, setFeedback] = useState(null)
   const [timeLeft, setTimeLeft] = useState(10)
   const [cumulativeScore, setCumulativeScore] = useState(0)
+  const [darkMode, setDarkMode] = useState(false)
   const timerRef = useRef(null)
   const startRef = useRef(null)
+
+  useEffect(() => {
+    // Load dark mode preference
+    const savedDarkMode = localStorage.getItem('darkMode') === 'true'
+    setDarkMode(savedDarkMode)
+    if (savedDarkMode) {
+      document.body.classList.add('dark-mode')
+    }
+  }, [])
 
   useEffect(() => {
     if (stage === 'quiz') loadQuestion()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage, index])
+
+  function toggleDarkMode() {
+    const newDarkMode = !darkMode
+    setDarkMode(newDarkMode)
+    localStorage.setItem('darkMode', newDarkMode)
+    if (newDarkMode) {
+      document.body.classList.add('dark-mode')
+    } else {
+      document.body.classList.remove('dark-mode')
+    }
+  }
 
   function startMathematics() {
     setOperationStage(true)
@@ -157,30 +178,41 @@ export default function App() {
     clearTimer()
   }
 
+  const percentage = Math.round((correctCount / TOTAL) * 100)
+
   return (
-    <div className="app card">
-      <h1>Quiz App</h1>
+    <div className="app">
+      <button className="theme-toggle" onClick={toggleDarkMode}>
+        {darkMode ? '☀️' : '🌙'}
+      </button>
+      <h1>QuizSphere</h1>
 
       {stage === 'select' && !operationStage && (
         <div className="menu">
-          <p className="subtitle">Choose a category</p>
+          <p className="subtitle">Welcome to your learning hub</p>
           <div className="menu-grid">
-            <button className="big" onClick={startMathematics}>MATHEMATICS</button>
+            <button className="big" onClick={startMathematics}>📊 MATHEMATICS</button>
           </div>
-          <p className="hint">GK & Grammar coming soon</p>
+          <p className="hint">More categories coming soon...</p>
         </div>
       )}
 
       {operationStage && stage === 'select' && (
         <div className="select">
-          <p>Select arithmetic type (10 questions):</p>
+          <p>Choose your quiz mode (10 questions each)</p>
           <div className="buttons">
-            {['add', 'subtract', 'multiply', 'divide'].map(t => (
-              <button key={t} onClick={() => startQuizForType(t)}>{t.toUpperCase()}</button>
+            {[
+              { key: 'add', label: '➕ Addition', emoji: '➕' },
+              { key: 'subtract', label: '➖ Subtraction', emoji: '➖' },
+              { key: 'multiply', label: '✖️ Multiplication', emoji: '✖️' },
+              { key: 'divide', label: '➗ Division', emoji: '➗' },
+              { key: 'mixed', label: '🎲 Mixed Mode', emoji: '🎲' }
+            ].map(t => (
+              <button key={t.key} onClick={() => startQuizForType(t.key)}>
+                {t.label}
+              </button>
             ))}
-            <div>
-              <button className="secondary" onClick={() => setOperationStage(false)}>Back</button>
-            </div>
+            <button className="secondary" onClick={() => setOperationStage(false)}>← Back</button>
           </div>
         </div>
       )}
@@ -188,38 +220,52 @@ export default function App() {
       {stage === 'quiz' && (
         <div className="quiz">
           <div className="top-row">
-            <div>Question {index + 1} / {TOTAL}</div>
+            <div>Question {index + 1} of {TOTAL}</div>
             <div>Score: {cumulativeScore}</div>
           </div>
           <div className="time-bar">
             <div className="time-fill" style={{ width: `${(timeLeft / 10) * 100}%` }} />
           </div>
-          {loading && <p>Loading...</p>}
+          {loading && <p style={{textAlign: 'center', color: '#667eea'}}>Loading...</p>}
           {question && (
             <form onSubmit={submit} className="question-form">
               <div className="q">{question.a} {opSymbol(question.op)} {question.b} = ?</div>
-              <input autoFocus value={answer} onChange={e => setAnswer(e.target.value)} type="number" step="any" required />
+              <input 
+                autoFocus 
+                value={answer} 
+                onChange={e => setAnswer(e.target.value)} 
+                type="number" 
+                step="any" 
+                placeholder="Enter your answer"
+                required 
+              />
               <div className="actions">
-                <button type="submit" disabled={loading}>Submit</button>
+                <button type="submit" disabled={loading}>Submit Answer</button>
                 <button type="button" className="secondary" onClick={() => { clearTimer(); handleExpire(); }}>Skip</button>
               </div>
             </form>
           )}
           {feedback && (
             <div className={`feedback ${feedback.correct ? 'correct' : 'wrong'}`}>
-              {feedback.correct ? `Correct (+${feedback.points})` : `Wrong — Expected ${feedback.expected}`}
+              {feedback.correct ? `✓ Correct! +${feedback.points} points` : `✗ Wrong — Answer was ${feedback.expected}`}
             </div>
           )}
-          <div className="score">Correct so far: {correctCount}</div>
+          <div className="score">✓ Correct so far: {correctCount}/{TOTAL}</div>
         </div>
       )}
 
       {stage === 'result' && (
         <div className="result">
-          <h2>Finished</h2>
-          <p>You answered {correctCount} out of {TOTAL} correctly.</p>
-          <p>Total points: {cumulativeScore}</p>
-          <button onClick={restart}>Back to menu</button>
+          <h2>Quiz Complete! 🎉</h2>
+          <p className="result-message">
+            Great job! You completed all 10 questions.
+          </p>
+          <div className="result-score">
+            <div>Your Score</div>
+            <div className="result-score-value">{cumulativeScore}</div>
+            <div className="result-percentage">You got {correctCount} out of {TOTAL} correct ({percentage}%)</div>
+          </div>
+          <button onClick={restart}>Try Another Quiz</button>
         </div>
       )}
     </div>
@@ -229,9 +275,10 @@ export default function App() {
 function opSymbol(op) {
   switch (op) {
     case 'add': return '+'
-    case 'subtract': return '-'
+    case 'subtract': return '−'
     case 'multiply': return '×'
     case 'divide': return '÷'
     default: return op
   }
 }
+
