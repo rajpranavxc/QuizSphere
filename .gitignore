@@ -29,3 +29,7 @@ backend/bin/
 # Environment
 .env
 .env.*
+
+# User data (scores, preferences)
+backend/scores.json
+frontend/.env.local

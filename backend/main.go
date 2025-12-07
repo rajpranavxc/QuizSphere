@@ -2,11 +2,18 @@ package main
 
 import (
 	"encoding/json"
+	"io/ioutil"
 	"log"
 	"math/rand"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
+)
+
+var (
+	scoresFile = "scores.json"
+	scores     = make(map[string][]ScoreRecord) // userID -> scores
 )
 
 type Question struct {
@@ -28,15 +35,69 @@ type CheckResponse struct {
 	Expected float64 `json:"expected"`
 }
 
+type ScoreRecord struct {
+	ID        int       `json:"id"`
+	UserID    string    `json:"user_id"`
+	QuizType  string    `json:"quiz_type"`
+	Score     int       `json:"score"`
+	Correct   int       `json:"correct"`
+	Total     int       `json:"total"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type ScoresResponse struct {
+	Type   string        `json:"type"`
+	Scores []ScoreRecord `json:"scores"`
+}
+
 func main() {
 	rand.Seed(time.Now().UnixNano())
+
+	// Load existing scores from file
+	loadScores()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/question", questionHandler)
 	mux.HandleFunc("/check", checkHandler)
+	mux.HandleFunc("/save-score", saveScoreHandler)
+	mux.HandleFunc("/get-scores", getScoresHandler)
 	handler := cors(mux)
 	log.Println("Backend running on :8080")
 	if err := http.ListenAndServe(":8080", handler); err != nil {
 		log.Fatal(err)
+	}
+}
+
+// loadScores loads scores from the JSON file
+func loadScores() {
+	if _, err := os.Stat(scoresFile); os.IsNotExist(err) {
+		scores = make(map[string][]ScoreRecord)
+		return
+	}
+
+	data, err := ioutil.ReadFile(scoresFile)
+	if err != nil {
+		log.Printf("Error reading scores file: %v", err)
+		scores = make(map[string][]ScoreRecord)
+		return
+	}
+
+	if err := json.Unmarshal(data, &scores); err != nil {
+		log.Printf("Error unmarshaling scores: %v", err)
+		scores = make(map[string][]ScoreRecord)
+	}
+}
+
+// saveScoresFile writes scores to the JSON file
+func saveScoresFile() {
+	data, err := json.MarshalIndent(scores, "", "  ")
+	if err != nil {
+		log.Printf("Error marshaling scores: %v", err)
+		return
+	}
+
+	if err := ioutil.WriteFile(scoresFile, data, 0644); err != nil {
+		log.Printf("Error writing scores file: %v", err)
 	}
 }
 
@@ -159,4 +220,66 @@ func abs(x float64) float64 {
 		return -x
 	}
 	return x
+}
+
+// saveScoreHandler saves a quiz score to memory and file
+func saveScoreHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		UserID   string `json:"user_id"`
+		QuizType string `json:"quiz_type"`
+		Score    int    `json:"score"`
+		Correct  int    `json:"correct"`
+		Total    int    `json:"total"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	// Create score record
+	sr := ScoreRecord{
+		ID:        len(scores[req.UserID]) + 1,
+		UserID:    req.UserID,
+		QuizType:  req.QuizType,
+		Score:     req.Score,
+		Correct:   req.Correct,
+		Total:     req.Total,
+		CreatedAt: time.Now(),
+	}
+
+	// Add to scores map
+	scores[req.UserID] = append(scores[req.UserID], sr)
+
+	// Save to file
+	saveScoresFile()
+
+	log.Printf("Score saved - UserID: %s, Type: %s, Score: %d, Correct: %d/%d",
+		req.UserID, req.QuizType, req.Score, req.Correct, req.Total)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// getScoresHandler retrieves scores for a user
+func getScoresHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		http.Error(w, "missing user_id", http.StatusBadRequest)
+		return
+	}
+
+	userScores, exists := scores[userID]
+	if !exists {
+		userScores = []ScoreRecord{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	log.Printf("Returning %d scores for user %s", len(userScores), userID)
+	json.NewEncoder(w).Encode(userScores)
 }
